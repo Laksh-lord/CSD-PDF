@@ -9,8 +9,8 @@ import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 import { getFirestore } from 'firebase/firestore';
 
-// Your Firebase project configuration
-// These values come from your .env file (see .env.example)
+const USE_SUPABASE = import.meta.env.VITE_USE_SUPABASE === 'true';
+
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -20,12 +20,20 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-// Initialize Firebase app
-const app = initializeApp(firebaseConfig);
+function hasValidFirebaseConfig() {
+  const values = Object.values(firebaseConfig).map((v) => (v || '').trim());
+  if (values.some((v) => !v)) return false;
+  if (values.some((v) => v.includes('your_'))) return false;
+  if (firebaseConfig.messagingSenderId === '123456789012') return false;
+  if ((firebaseConfig.appId || '').includes('abcdef1234567890')) return false;
+  return true;
+}
 
-// Export individual Firebase services
-export const auth = getAuth(app);       // Authentication
-export const storage = getStorage(app); // File Storage
-export const db = getFirestore(app);    // Firestore Database (for metadata)
+const shouldInitFirebase = !USE_SUPABASE && hasValidFirebaseConfig();
+const app = shouldInitFirebase ? initializeApp(firebaseConfig) : null;
+
+export const auth = app ? getAuth(app) : null;
+export const storage = app ? getStorage(app) : null;
+export const db = app ? getFirestore(app) : null;
 
 export default app;
