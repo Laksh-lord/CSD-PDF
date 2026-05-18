@@ -1,0 +1,81 @@
+// ═════════════════════════════════════════════════════════════════════════════
+// FIREBASE STORAGE SECURITY RULES
+// File: storage.rules
+//
+// Copy these rules into Firebase Console → Storage → Rules
+// ═════════════════════════════════════════════════════════════════════════════
+
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // PDF files stored under: pdfs/{userId}/{fileName}
+    match /pdfs/{userId}/{allPaths=**} {
+
+      // READ: Only the file owner can read their files
+      allow read: if request.auth != null
+                  && request.auth.uid == userId;
+
+      // WRITE (upload/update): Only the owner, PDF only, max 20MB
+      allow write: if request.auth != null
+                   && request.auth.uid == userId
+                   && request.resource.contentType == 'application/pdf'
+                   && request.resource.size <= 20 * 1024 * 1024;
+
+      // DELETE: Only the owner can delete their files
+      allow delete: if request.auth != null
+                    && request.auth.uid == userId;
+    }
+
+    // Block all other paths
+    match /{allOtherPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// FIRESTORE SECURITY RULES
+// File: firestore.rules
+//
+// Copy these rules into Firebase Console → Firestore Database → Rules
+// ═════════════════════════════════════════════════════════════════════════════
+
+/*
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // PDF metadata documents: pdfs/{docId}
+    match /pdfs/{docId} {
+
+      // READ: Only the owner of this PDF record
+      allow read: if request.auth != null
+                  && request.auth.uid == resource.data.userId;
+
+      // CREATE: Authenticated user, must set their own userId
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.userId
+                    && request.resource.data.keys().hasAll([
+                         'userId', 'fileName', 'fileSize',
+                         'storagePath', 'downloadURL', 'createdAt'
+                       ]);
+
+      // UPDATE: Not permitted (files are immutable)
+      allow update: if false;
+
+      // DELETE: Only the owner
+      allow delete: if request.auth != null
+                    && request.auth.uid == resource.data.userId;
+    }
+
+    // Block all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+*/
