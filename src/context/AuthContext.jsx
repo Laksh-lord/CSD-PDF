@@ -18,6 +18,7 @@ import { auth } from '../firebase';
 
 // Create context
 const AuthContext = createContext(null);
+const USE_SUPABASE = import.meta.env.VITE_USE_SUPABASE === 'true';
 
 // Custom hook for easy access
 export const useAuth = () => {
@@ -28,11 +29,16 @@ export const useAuth = () => {
 
 // Provider component
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(USE_SUPABASE ? { uid: 'public-user' } : null);
+  const [loading, setLoading] = useState(!USE_SUPABASE);
 
   // Listen for auth state changes
   useEffect(() => {
+    if (USE_SUPABASE) {
+      setLoading(false);
+      return () => {};
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
@@ -71,7 +77,7 @@ export function AuthProvider({ children }) {
   };
 
   // Sign out
-  const logout = () => signOut(auth);
+  const logout = () => (USE_SUPABASE ? Promise.resolve() : signOut(auth));
 
   const value = { user, loading, signup, login, loginWithGoogle, logout };
 
