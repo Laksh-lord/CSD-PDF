@@ -18,7 +18,7 @@ import { auth } from '../firebase';
 
 // Create context
 const AuthContext = createContext(null);
-const USE_SUPABASE = import.meta.env.VITE_USE_SUPABASE === 'true';
+const USE_SUPABASE = import.meta.env.VITE_USE_SUPABASE !== 'false';
 
 // Custom hook for easy access
 export const useAuth = () => {
@@ -34,7 +34,7 @@ export function AuthProvider({ children }) {
 
   // Listen for auth state changes
   useEffect(() => {
-    if (USE_SUPABASE) {
+    if (USE_SUPABASE || !auth) {
       setLoading(false);
       return () => {};
     }
