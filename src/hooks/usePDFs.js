@@ -147,16 +147,15 @@ function normalizeSupabasePdf(row) {
 }
 
 function normalizeLocalPdf(row) {
-  const objectUrl = URL.createObjectURL(row.blob);
-  localObjectUrls.add(objectUrl);
   return {
     id: String(row.id),
     fileName: row.fileName,
     fileSize: row.fileSize,
     storagePath: row.storagePath || `local:${row.id}`,
     createdAt: row.createdAt ? new Date(row.createdAt) : new Date(),
-    openURL: objectUrl,
-    downloadURL: objectUrl,
+    openURL: row.openURL || '',
+    downloadURL: row.downloadURL || '',
+    blob: row.blob || null,
   };
 }
 
@@ -187,7 +186,11 @@ export function usePDFs() {
   const fetchLocalPdfs = useCallback(async () => {
     const rows = await readLocalPdfs();
     clearLocalObjectUrls();
-    return rows.map(normalizeLocalPdf);
+    return rows.map((row) => {
+      const objectUrl = URL.createObjectURL(row.blob);
+      localObjectUrls.add(objectUrl);
+      return normalizeLocalPdf({ ...row, openURL: objectUrl, downloadURL: objectUrl });
+    });
   }, []);
 
   useEffect(() => {
@@ -236,11 +239,26 @@ export function usePDFs() {
 
         setUploadProgress(0);
 
-        if (useSupabase) {
+        const uploadLocal = async () => {
+          const record = {
+            id: makeId(),
+            fileName: file.name,
+            fileSize: file.size,
+            createdAt: new Date().toISOString(),
+            blob: file,
+          };
+          await saveLocalPdf(record);
+          const objectUrl = URL.createObjectURL(file);
+          localObjectUrls.add(objectUrl);
+          const normalized = normalizeLocalPdf({ ...record, openURL: objectUrl, downloadURL: objectUrl });
+          setPdfs((prev) => [normalized, ...prev]);
+          setUploadProgress(null);
+          resolve(normalized.downloadURL);
+        };
+
+        if (useSupabase && supabase) {
           (async () => {
             try {
-              if (!supabase) throw new Error('Supabase is not configured.');
-
               const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
               const storagePath = `${Date.now()}_${safeName}`;
 
@@ -277,32 +295,22 @@ export function usePDFs() {
               setUploadProgress(null);
               resolve(normalized.downloadURL);
             } catch (err) {
-              setUploadProgress(null);
-              reject(err);
+              console.warn('Supabase upload failed, saving locally instead.', err);
+              try {
+                await uploadLocal();
+              } catch (fallbackErr) {
+                setUploadProgress(null);
+                reject(fallbackErr);
+              }
             }
           })();
           return;
         }
 
-        (async () => {
-          try {
-            const record = {
-              id: makeId(),
-              fileName: file.name,
-              fileSize: file.size,
-              createdAt: new Date().toISOString(),
-              blob: file,
-            };
-            await saveLocalPdf(record);
-            const normalized = normalizeLocalPdf(record);
-            setPdfs((prev) => [normalized, ...prev]);
-            setUploadProgress(null);
-            resolve(normalized.downloadURL);
-          } catch (error) {
-            setUploadProgress(null);
-            reject(error);
-          }
-        })();
+        uploadLocal().catch((error) => {
+          setUploadProgress(null);
+          reject(error);
+        });
       });
     },
     [useSupabase]
@@ -310,19 +318,27 @@ export function usePDFs() {
 
   const deletePDF = useCallback(
     async (pdf) => {
-      if (useSupabase) {
+      if (useSupabase && supabase) {
         if (!supabase) throw new Error('Supabase is not configured.');
 
-        const { error: storageError } = await supabase.storage
-          .from(STORAGE_BUCKET)
-          .remove([pdf.storagePath]);
-        if (storageError) throw storageError;
+        try {
+          const { error: storageError } = await supabase.storage
+            .from(STORAGE_BUCKET)
+            .remove([pdf.storagePath]);
+          if (storageError) throw storageError;
 
-        const { error: rowError } = await supabase
-          .from('pdfs')
-          .delete()
-          .eq('id', Number(pdf.id));
-        if (rowError) throw rowError;
+          const { error: rowError } = await supabase
+            .from('pdfs')
+            .delete()
+            .eq('id', Number(pdf.id));
+          if (rowError) throw rowError;
+        } catch (error) {
+          console.warn('Supabase delete failed, falling back to local delete.', error);
+          await deleteLocalPdf(pdf.id);
+          if (pdf.openURL?.startsWith('blob:')) URL.revokeObjectURL(pdf.openURL);
+          setPdfs((prev) => prev.filter((item) => item.id !== pdf.id));
+          return;
+        }
 
         setPdfs((prev) => prev.filter((item) => item.id !== pdf.id));
         return;
