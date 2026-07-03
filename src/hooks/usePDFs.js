@@ -4,6 +4,7 @@ import { supabase, hasSupabaseConfig } from '../supabase';
 const MAX_SIZE_BYTES = 20 * 1024 * 1024;
 const STORAGE_BUCKET = import.meta.env.VITE_SUPABASE_BUCKET || 'pdfs';
 const ENABLE_SUPABASE = import.meta.env.VITE_USE_SUPABASE !== 'false';
+const DEFAULT_PUBLIC_API_BASE = 'https://equivalent-columns-ranging-golf.trycloudflare.com';
 const LOCAL_DB_NAME = 'pdfvault-local';
 const LOCAL_DB_VERSION = 1;
 const LOCAL_STORE = 'pdfs';
@@ -101,13 +102,14 @@ function getApiBaseUrl() {
       return 'http://127.0.0.1:8787';
     }
 
-    return origin;
+    return DEFAULT_PUBLIC_API_BASE;
   }
 
-  return 'http://127.0.0.1:8787';
+  return DEFAULT_PUBLIC_API_BASE;
 }
 
 const API_BASE = getApiBaseUrl();
+const USE_BACKEND = typeof window !== 'undefined' && API_BASE !== window.location.origin;
 
 function resolveApiUrl(path) {
   if (!path) return API_BASE;
@@ -161,6 +163,7 @@ function normalizeLocalPdf(row) {
 
 export function usePDFs() {
   const useSupabase = ENABLE_SUPABASE && hasSupabaseConfig;
+  const useBackend = USE_BACKEND;
   const [pdfs, setPdfs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploadProgress, setUploadProgress] = useState(null);
@@ -183,7 +186,14 @@ export function usePDFs() {
     return (data || []).map(normalizeSupabasePdf);
   }, []);
 
-  const fetchLocalPdfs = useCallback(async () => {
+  const fetchBackendPdfs = useCallback(async () => {
+    const res = await fetch(resolveApiUrl('/api/pdfs'));
+    if (!res.ok) throw new Error('Failed to fetch files from backend.');
+    const items = await res.json();
+    return items.map(normalizeApiPdf);
+  }, []);
+
+  const fetchBrowserPdfs = useCallback(async () => {
     const rows = await readLocalPdfs();
     clearLocalObjectUrls();
     return rows.map((row) => {
@@ -199,15 +209,22 @@ export function usePDFs() {
     const run = async () => {
       try {
         let items = [];
-        if (useSupabase) {
+        if (useBackend) {
+          try {
+            items = await fetchBackendPdfs();
+          } catch (error) {
+            console.warn('Backend fetch failed, falling back to browser storage.', error);
+            items = await fetchBrowserPdfs();
+          }
+        } else if (useSupabase) {
           try {
             items = await fetchSupabase();
           } catch (error) {
             console.warn('Supabase fetch failed, falling back to local browser storage.', error);
-            items = await fetchLocalPdfs();
+            items = await fetchBrowserPdfs();
           }
         } else {
-          items = await fetchLocalPdfs();
+          items = await fetchBrowserPdfs();
         }
         setPdfs(items);
       } catch (err) {
@@ -222,7 +239,7 @@ export function usePDFs() {
     return () => {
       clearLocalObjectUrls();
     };
-  }, [useSupabase, fetchLocalPdfs, fetchSupabase]);
+  }, [useBackend, useSupabase, fetchBackendPdfs, fetchBrowserPdfs, fetchSupabase]);
 
   const uploadPDF = useCallback(
     (file) => {
@@ -255,6 +272,40 @@ export function usePDFs() {
           setUploadProgress(null);
           resolve(normalized.downloadURL);
         };
+
+        if (useBackend) {
+          (async () => {
+            try {
+              const formData = new FormData();
+              formData.append('file', file);
+
+              const response = await fetch(resolveApiUrl('/api/pdfs'), {
+                method: 'POST',
+                body: formData,
+              });
+
+              if (!response.ok) {
+                const body = await response.json().catch(() => ({}));
+                throw new Error(body.error || 'Upload failed.');
+              }
+
+              const created = await response.json();
+              const normalized = normalizeApiPdf(created);
+              setPdfs((prev) => [normalized, ...prev]);
+              setUploadProgress(null);
+              resolve(normalized.downloadURL);
+            } catch (error) {
+              console.warn('Backend upload failed, saving locally instead.', error);
+              try {
+                await uploadLocal();
+              } catch (fallbackErr) {
+                setUploadProgress(null);
+                reject(fallbackErr);
+              }
+            }
+          })();
+          return;
+        }
 
         if (useSupabase && supabase) {
           (async () => {
@@ -313,11 +364,31 @@ export function usePDFs() {
         });
       });
     },
-    [useSupabase]
+    [useBackend, useSupabase]
   );
 
   const deletePDF = useCallback(
     async (pdf) => {
+      if (useBackend) {
+        try {
+          const response = await fetch(resolveApiUrl(`/api/pdfs/${pdf.id}`), {
+            method: 'DELETE',
+          });
+          if (!response.ok && response.status !== 404) {
+            throw new Error('Failed to delete file.');
+          }
+        } catch (error) {
+          console.warn('Backend delete failed, falling back to browser storage.', error);
+          await deleteLocalPdf(pdf.id);
+          if (pdf.openURL?.startsWith('blob:')) URL.revokeObjectURL(pdf.openURL);
+          setPdfs((prev) => prev.filter((item) => item.id !== pdf.id));
+          return;
+        }
+
+        setPdfs((prev) => prev.filter((item) => item.id !== pdf.id));
+        return;
+      }
+
       if (useSupabase && supabase) {
         if (!supabase) throw new Error('Supabase is not configured.');
 
