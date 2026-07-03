@@ -2,17 +2,40 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase, hasSupabaseConfig } from '../supabase';
 
 const MAX_SIZE_BYTES = 20 * 1024 * 1024;
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8787';
 const STORAGE_BUCKET = import.meta.env.VITE_SUPABASE_BUCKET || 'pdfs';
 const ENABLE_SUPABASE = import.meta.env.VITE_USE_SUPABASE === 'true';
+
+function getApiBaseUrl() {
+  const configuredBase = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (configuredBase) return configuredBase.replace(/\/+$/, '');
+
+  if (typeof window !== 'undefined') {
+    const { hostname, origin } = window.location;
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+      return 'http://127.0.0.1:8787';
+    }
+
+    return origin;
+  }
+
+  return 'http://127.0.0.1:8787';
+}
+
+const API_BASE = getApiBaseUrl();
+
+function resolveApiUrl(path) {
+  if (!path) return API_BASE;
+  if (/^https?:\/\//.test(path)) return path;
+  return `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
+}
 
 function normalizeApiPdf(pdf) {
   const openURL = pdf.openURL?.startsWith('http')
     ? pdf.openURL
-    : `${API_BASE}${pdf.openURL || ''}`;
+    : resolveApiUrl(pdf.openURL || '');
   const downloadURL = pdf.downloadURL?.startsWith('http')
     ? pdf.downloadURL
-    : `${API_BASE}${pdf.downloadURL || ''}`;
+    : resolveApiUrl(pdf.downloadURL || '');
 
   return {
     id: String(pdf.id),
@@ -44,7 +67,7 @@ export function usePDFs() {
   const [uploadProgress, setUploadProgress] = useState(null);
 
   const fetchLocal = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/api/pdfs`);
+    const res = await fetch(resolveApiUrl('/api/pdfs'));
     if (!res.ok) throw new Error('Failed to fetch files from backend.');
     const items = await res.json();
     return items.map(normalizeApiPdf);
@@ -144,7 +167,7 @@ export function usePDFs() {
 
         const formData = new FormData();
         formData.append('file', file);
-        fetch(`${API_BASE}/api/pdfs`, { method: 'POST', body: formData })
+        fetch(resolveApiUrl('/api/pdfs'), { method: 'POST', body: formData })
           .then(async (res) => {
             if (!res.ok) {
               const body = await res.json().catch(() => ({}));
@@ -187,7 +210,7 @@ export function usePDFs() {
         return;
       }
 
-      const res = await fetch(`${API_BASE}/api/pdfs/${pdf.id}`, {
+      const res = await fetch(resolveApiUrl(`/api/pdfs/${pdf.id}`), {
         method: 'DELETE',
       });
       if (!res.ok && res.status !== 404) {
