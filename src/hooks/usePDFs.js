@@ -3,7 +3,7 @@ import { supabase, hasSupabaseConfig } from '../supabase';
 
 const MAX_SIZE_BYTES = 20 * 1024 * 1024;
 const STORAGE_BUCKET = import.meta.env.VITE_SUPABASE_BUCKET || 'pdfs';
-const ENABLE_SUPABASE = import.meta.env.VITE_USE_SUPABASE === 'true';
+const ENABLE_SUPABASE = import.meta.env.VITE_USE_SUPABASE !== 'false';
 
 function getApiBaseUrl() {
   const configuredBase = import.meta.env.VITE_API_BASE_URL?.trim();
