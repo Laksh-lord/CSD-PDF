@@ -4,6 +4,92 @@ import { supabase, hasSupabaseConfig } from '../supabase';
 const MAX_SIZE_BYTES = 20 * 1024 * 1024;
 const STORAGE_BUCKET = import.meta.env.VITE_SUPABASE_BUCKET || 'pdfs';
 const ENABLE_SUPABASE = import.meta.env.VITE_USE_SUPABASE !== 'false';
+const LOCAL_DB_NAME = 'pdfvault-local';
+const LOCAL_DB_VERSION = 1;
+const LOCAL_STORE = 'pdfs';
+const localObjectUrls = new Set();
+
+function makeId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function openLocalDb() {
+  if (typeof indexedDB === 'undefined') {
+    return Promise.reject(new Error('Local storage is unavailable in this browser.'));
+  }
+
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(LOCAL_DB_NAME, LOCAL_DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(LOCAL_STORE)) {
+        db.createObjectStore(LOCAL_STORE, { keyPath: 'id' });
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('Failed to open local storage.'));
+  });
+}
+
+async function readLocalPdfs() {
+  const db = await openLocalDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(LOCAL_STORE, 'readonly');
+    const store = tx.objectStore(LOCAL_STORE);
+    const request = store.getAll();
+
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error || new Error('Failed to read local files.'));
+    tx.oncomplete = () => db.close();
+    tx.onerror = () => db.close();
+  });
+}
+
+async function saveLocalPdf(record) {
+  const db = await openLocalDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(LOCAL_STORE, 'readwrite');
+    tx.objectStore(LOCAL_STORE).put(record);
+    tx.oncomplete = () => {
+      db.close();
+      resolve(record);
+    };
+    tx.onerror = () => {
+      const error = tx.error || new Error('Failed to save local file.');
+      db.close();
+      reject(error);
+    };
+  });
+}
+
+async function deleteLocalPdf(id) {
+  const db = await openLocalDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(LOCAL_STORE, 'readwrite');
+    tx.objectStore(LOCAL_STORE).delete(id);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      const error = tx.error || new Error('Failed to delete local file.');
+      db.close();
+      reject(error);
+    };
+  });
+}
+
+function clearLocalObjectUrls() {
+  for (const url of localObjectUrls) {
+    URL.revokeObjectURL(url);
+  }
+  localObjectUrls.clear();
+}
 
 function getApiBaseUrl() {
   const configuredBase = import.meta.env.VITE_API_BASE_URL?.trim();
@@ -60,6 +146,20 @@ function normalizeSupabasePdf(row) {
   };
 }
 
+function normalizeLocalPdf(row) {
+  const objectUrl = URL.createObjectURL(row.blob);
+  localObjectUrls.add(objectUrl);
+  return {
+    id: String(row.id),
+    fileName: row.fileName,
+    fileSize: row.fileSize,
+    storagePath: row.storagePath || `local:${row.id}`,
+    createdAt: row.createdAt ? new Date(row.createdAt) : new Date(),
+    openURL: objectUrl,
+    downloadURL: objectUrl,
+  };
+}
+
 export function usePDFs() {
   const useSupabase = ENABLE_SUPABASE && hasSupabaseConfig;
   const [pdfs, setPdfs] = useState([]);
@@ -84,12 +184,28 @@ export function usePDFs() {
     return (data || []).map(normalizeSupabasePdf);
   }, []);
 
+  const fetchLocalPdfs = useCallback(async () => {
+    const rows = await readLocalPdfs();
+    clearLocalObjectUrls();
+    return rows.map(normalizeLocalPdf);
+  }, []);
+
   useEffect(() => {
     setLoading(true);
 
     const run = async () => {
       try {
-        const items = useSupabase ? await fetchSupabase() : await fetchLocal();
+        let items = [];
+        if (useSupabase) {
+          try {
+            items = await fetchSupabase();
+          } catch (error) {
+            console.warn('Supabase fetch failed, falling back to local browser storage.', error);
+            items = await fetchLocalPdfs();
+          }
+        } else {
+          items = await fetchLocalPdfs();
+        }
         setPdfs(items);
       } catch (err) {
         console.error(err);
@@ -100,7 +216,10 @@ export function usePDFs() {
     };
 
     run();
-  }, [useSupabase, fetchLocal, fetchSupabase]);
+    return () => {
+      clearLocalObjectUrls();
+    };
+  }, [useSupabase, fetchLocalPdfs, fetchSupabase]);
 
   const uploadPDF = useCallback(
     (file) => {
@@ -165,26 +284,25 @@ export function usePDFs() {
           return;
         }
 
-        const formData = new FormData();
-        formData.append('file', file);
-        fetch(resolveApiUrl('/api/pdfs'), { method: 'POST', body: formData })
-          .then(async (res) => {
-            if (!res.ok) {
-              const body = await res.json().catch(() => ({}));
-              throw new Error(body.error || 'Upload failed.');
-            }
-            return res.json();
-          })
-          .then((created) => {
-            const normalized = normalizeApiPdf(created);
+        (async () => {
+          try {
+            const record = {
+              id: makeId(),
+              fileName: file.name,
+              fileSize: file.size,
+              createdAt: new Date().toISOString(),
+              blob: file,
+            };
+            await saveLocalPdf(record);
+            const normalized = normalizeLocalPdf(record);
             setPdfs((prev) => [normalized, ...prev]);
             setUploadProgress(null);
             resolve(normalized.downloadURL);
-          })
-          .catch((err) => {
+          } catch (error) {
             setUploadProgress(null);
-            reject(new Error(`${err.message} (Backend: ${API_BASE})`));
-          });
+            reject(error);
+          }
+        })();
       });
     },
     [useSupabase]
@@ -210,12 +328,8 @@ export function usePDFs() {
         return;
       }
 
-      const res = await fetch(resolveApiUrl(`/api/pdfs/${pdf.id}`), {
-        method: 'DELETE',
-      });
-      if (!res.ok && res.status !== 404) {
-        throw new Error('Failed to delete file.');
-      }
+      await deleteLocalPdf(pdf.id);
+      if (pdf.openURL?.startsWith('blob:')) URL.revokeObjectURL(pdf.openURL);
       setPdfs((prev) => prev.filter((item) => item.id !== pdf.id));
     },
     [useSupabase]
