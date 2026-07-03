@@ -9,6 +9,7 @@ import sqlite3 from 'sqlite3';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
+const DIST_DIR = path.join(ROOT_DIR, 'dist');
 const DATA_DIR = path.join(ROOT_DIR, 'server-data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const DB_PATH = path.join(DATA_DIR, 'pdfvault.db');
@@ -33,6 +34,15 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(UPLOADS_DIR));
+if (fs.existsSync(DIST_DIR)) {
+  app.use(express.static(DIST_DIR));
+  app.get('/', (_req, res) => {
+    res.sendFile(path.join(DIST_DIR, 'index.html'));
+  });
+  app.get('/index.html', (_req, res) => {
+    res.sendFile(path.join(DIST_DIR, 'index.html'));
+  });
+}
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
@@ -123,6 +133,21 @@ app.delete('/api/pdfs/:id', (req, res) => {
     });
   });
 });
+
+if (fs.existsSync(DIST_DIR)) {
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' || req.path.startsWith('/api/') || req.path.startsWith('/uploads/')) {
+      return next();
+    }
+
+    const indexPath = path.join(DIST_DIR, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      return res.sendFile(indexPath);
+    }
+
+    return next();
+  });
+}
 
 app.listen(PORT, () => {
   console.log(`PDFVault backend running on http://127.0.0.1:${PORT}`);
