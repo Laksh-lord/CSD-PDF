@@ -106,7 +106,7 @@ function getApiBaseUrl() {
 }
 
 const API_BASE = getApiBaseUrl();
-const USE_BACKEND = Boolean(import.meta.env.VITE_API_BASE_URL?.trim());
+const USE_BACKEND = false;
 
 function resolveApiUrl(path) {
   if (!path) return API_BASE;
