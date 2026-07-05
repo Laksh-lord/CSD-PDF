@@ -12,7 +12,7 @@ export default function SearchBar({ value, onChange }) {
       <input
         type="text"
         className="search-input"
-        placeholder="Search your PDFs…"
+        placeholder="Search streams…"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         aria-label="Search PDFs"

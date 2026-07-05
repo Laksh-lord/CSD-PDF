@@ -1,8 +1,4 @@
 // src/components/Navbar.jsx
-// ─────────────────────────────────────────────────────────────────────────────
-// Top navigation bar with user info, theme toggle, and logout
-// ─────────────────────────────────────────────────────────────────────────────
-
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -15,6 +11,9 @@ export default function Navbar() {
   const { theme, toggleTheme } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
 
+  const displayName = user?.displayName || user?.email || 'Account';
+  const initials = getInitials(displayName);
+
   const handleLogout = async () => {
     try {
       await logout();
@@ -24,22 +23,21 @@ export default function Navbar() {
     }
   };
 
-  const displayName = user?.displayName || user?.email || 'User';
-  const initials = getInitials(displayName);
-
   return (
-    <nav className="navbar">
-      {/* Logo */}
+    <nav className="navbar navbar--obsidian">
       <div className="navbar-brand">
-        <FileText size={22} className="navbar-logo-icon" />
-        <span className="navbar-logo-text">csd</span>
+        <div className="navbar-logo-mark">
+          <FileText size={18} className="navbar-logo-icon" />
+        </div>
+        <div className="navbar-brand-copy">
+          <span className="navbar-logo-text">csdpdf</span>
+          <span className="navbar-logo-subtext">obsidian flux</span>
+        </div>
       </div>
 
-      {/* Right controls */}
       <div className="navbar-right">
-        {/* Theme toggle */}
         <button
-          className="icon-btn theme-toggle"
+          className="icon-btn icon-btn--ghost theme-toggle"
           onClick={toggleTheme}
           title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
           aria-label="Toggle theme"
@@ -47,11 +45,10 @@ export default function Navbar() {
           {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
         </button>
 
-        {/* User dropdown */}
         <div className="user-menu-wrap">
           <button
             className="user-menu-trigger"
-            onClick={() => setMenuOpen((o) => !o)}
+            onClick={() => setMenuOpen((current) => !current)}
             aria-expanded={menuOpen}
           >
             {user?.photoURL ? (
@@ -59,17 +56,21 @@ export default function Navbar() {
             ) : (
               <div className="user-avatar">{initials}</div>
             )}
-            <span className="user-name">{user?.displayName || 'Account'}</span>
+            <span className="user-name">{user?.displayName || 'Operator'}</span>
             <ChevronDown size={14} className={`chevron ${menuOpen ? 'open' : ''}`} />
           </button>
 
           {menuOpen && (
             <>
-              {/* Backdrop to close menu */}
-              <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
+              <button
+                type="button"
+                className="menu-backdrop"
+                onClick={() => setMenuOpen(false)}
+                aria-label="Close account menu"
+              />
               <div className="user-dropdown">
                 <div className="dropdown-header">
-                  <strong>{user?.displayName || 'User'}</strong>
+                  <strong>{user?.displayName || 'Operator'}</strong>
                   <span>{user?.email}</span>
                 </div>
                 <hr className="dropdown-divider" />
