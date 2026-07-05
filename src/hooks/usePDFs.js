@@ -4,7 +4,6 @@ import { supabase, hasSupabaseConfig } from '../supabase';
 const MAX_SIZE_BYTES = 20 * 1024 * 1024;
 const STORAGE_BUCKET = import.meta.env.VITE_SUPABASE_BUCKET || 'pdfs';
 const ENABLE_SUPABASE = import.meta.env.VITE_USE_SUPABASE !== 'false';
-const DEFAULT_PUBLIC_API_BASE = 'https://equivalent-columns-ranging-golf.trycloudflare.com';
 const LOCAL_DB_NAME = 'pdfvault-local';
 const LOCAL_DB_VERSION = 1;
 const LOCAL_STORE = 'pdfs';
@@ -101,15 +100,13 @@ function getApiBaseUrl() {
     if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
       return 'http://127.0.0.1:8787';
     }
-
-    return DEFAULT_PUBLIC_API_BASE;
   }
 
-  return DEFAULT_PUBLIC_API_BASE;
+  return 'http://127.0.0.1:8787';
 }
 
 const API_BASE = getApiBaseUrl();
-const USE_BACKEND = typeof window !== 'undefined' && API_BASE !== window.location.origin;
+const USE_BACKEND = Boolean(import.meta.env.VITE_API_BASE_URL?.trim());
 
 function resolveApiUrl(path) {
   if (!path) return API_BASE;
